@@ -1,31 +1,8 @@
-# 🌱 VISION-X Green FinTech
 
-AI-powered Renewable Energy Verification & Incentive Engine.
+# ⚠️ BACK TO STREAMLIT
+The React/FastAPI frontend has been removed as per request.
+We are now using the Python Streamlit version `main.py` directly.
 
-## Features
-- Real-time ESP32 solar energy monitoring
-- ML-based anomaly detection (Isolation Forest)
-- Green coin incentive engine
-- SQLite user management
-- Streamlit dashboard UI
-
-## Tech Stack
-- ESP32 + INA219
-- Python
-- Streamlit
-- Scikit-learn
-- SQLite
-
-## How to Run
-
-1. Create virtual environment:
-   python -m venv venv
-
-2. Activate:
-   venv\Scripts\activate
-
-3. Install:
-   pip install -r requirements.txt
-
-4. Run:
-   streamlit run main.py
+## Usage
+1. `Scripts\activate`
+2. `streamlit run main.py`
