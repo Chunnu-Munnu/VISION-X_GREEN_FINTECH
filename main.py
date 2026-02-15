@@ -11,262 +11,241 @@ from database import init_db, create_user, get_user, update_coins, log_reading, 
 init_db()
 st.set_page_config(layout="wide", page_title="VISION-X Green FinTech")
 
-# ---------------- STYLES (Clean & Professional) ----------------
-# Force Dark/Light adaptability without imposing weird colors
+# ---------------- STYLES (Professional Black & White) ----------------
 st.markdown("""
 <style>
-    /* Metric Card Styling */
+    /* Main Background */
+    .stApp {
+        background-color: #000000;
+        color: #FFFFFF;
+        font-family: 'Roboto Mono', monospace;
+    }
+    
+    /* Metrics */
+    div[data-testid="stMetricValue"] {
+        font-size: 24px;
+        color: #FFFFFF;
+        font-family: 'Courier New', monospace;
+    }
+    div[data-testid="stMetricLabel"] {
+        color: #888888;
+        font-size: 14px;
+    }
+    
+    /* Borders for Cards */
     .stMetric {
-        background-color: transparent !important;
-        border: 1px solid rgba(128, 128, 128, 0.2);
+        background-color: #111111 !important;
+        border: 1px solid #333333;
         padding: 10px;
-        border-radius: 8px;
     }
     
-    /* Remove Header Decoration */
-    header {visibility: hidden;}
-    
-    /* Login Form Centering */
-    div.stButton > button {
-        width: 100%;
+    /* Buttons */
+    .stButton > button {
+        border-radius: 0px;
+        border: 1px solid #FFFFFF;
+        background-color: #000000;
+        color: #FFFFFF;
         font-weight: bold;
+        transition: all 0.2s;
     }
+    .stButton > button:hover {
+        background-color: #FFFFFF;
+        color: #000000;
+        border-color: #FFFFFF;
+    }
+    
+    /* Remove Header/Footer */
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🌱 VISION-X Green FinTech")
-st.caption("AI-Powered Renewable Energy Verification & Incentive Engine")
+st.title("⚡ VISION-X :: GREEN FINTECH TERMINAL")
+st.caption("SECURE RENEWABLE ENERGY VERIFICATION NODE [v2.4]")
 
 # ---------------- SESSION STATE ----------------
-for key in ["user_id", "coins", "model", "data_buffer", "ser", "running", "penalty_until", "simulate_grid"]:
+for key in ["user_id", "coins", "model", "data_buffer", "ser", "running", "penalty_until", "simulate_grid", "noise_threshold", "voltage_cutoff", "last_vals"]:
     if key not in st.session_state:
         if key == "model": st.session_state[key] = SolarAnomalyModel()
         elif key == "data_buffer": st.session_state[key] = []
         elif key in ["coins", "penalty_until"]: st.session_state[key] = 0.0
+        elif key == "noise_threshold": st.session_state[key] = 0.05
+        elif key == "voltage_cutoff": st.session_state[key] = 0.5
+        elif key == "last_vals": st.session_state[key] = (0.0, 0.0, 0.0)
         else: st.session_state[key] = None
 
-if "simulate_grid" not in st.session_state: st.session_state.simulate_grid = False
-if "running" not in st.session_state: st.session_state.running = False
-
-
-# ---------------- AUTHENTICATION ----------------
-if st.session_state.user_id is None:
-    
-    tab1, tab2 = st.tabs(["Login", "Register"])
-    
-    with tab1:
-        with st.form("login_form"):
-            uid_input = st.text_input("Enter User ID", placeholder="e.g. 1")
-            login_submitted = st.form_submit_button("Access Dashboard")
-            
-            if login_submitted:
-                if uid_input:
-                    try:
-                        user = get_user(int(uid_input))
-                        if user:
-                            st.session_state.user_id = user[0]
-                            st.session_state.coins = user[3]
-                            st.rerun()
-                        else:
-                            st.error("User ID not found.")
-                    except ValueError:
-                        st.error("Please enter a valid numeric ID.")
-
-    with tab2:
-        with st.form("register_form"):
-            name = st.text_input("Full Name")
-            phone = st.text_input("Phone Number")
-            reg_submitted = st.form_submit_button("Create Account")
-            
-            if reg_submitted:
-                if name and phone:
-                    user_id = create_user(name, phone)
-                    st.session_state.user_id = user_id
-                    st.success(f"User Created. Your ID: {user_id}")
-                    st.rerun()
-                else:
-                    st.warning("Please enter name and phone.")
-
-# ---------------- MAIN DASHBOARD ----------------
-else:
-    user = get_user(st.session_state.user_id)
-    if not user:
-        st.session_state.user_id = None
-        st.rerun()
-
-    user_id, name, phone, coins_db = user
-    
-    # Sidebar
-    with st.sidebar:
-        st.header(f"👤 {name}")
-        st.caption(f"ID: {user_id}")
-        
-        if st.button("Logout"):
-            if st.session_state.ser:
-                st.session_state.ser.close()
+# ---------------- SIDEBAR (CONFIG ONLY) ----------------
+with st.sidebar:
+    st.header("SYSTEM CONFIG")
+    if st.session_state.user_id:
+        st.success(f"USER_ID: {st.session_state.user_id}")
+        if st.button("LOGOUT [EXIT]"):
+            if st.session_state.ser: st.session_state.ser.close()
             st.session_state.user_id = None
             st.session_state.running = False
             st.rerun()
-            
-        st.divider()
-        st.markdown("### ⚙ Connection")
-        port = st.text_input("COM Port", value="COM7")
-        
-        c1, c2 = st.columns(2)
-        if c1.button("Start", type="primary"):
-            try:
-                if not st.session_state.running:
+    
+    st.divider()
+    st.markdown("### CALIBRATION")
+    st.caption("Sensor Noise Filter")
+    noise_threshold = st.slider("Min Current (A)", 0.0, 1.0, key="noise_threshold", step=0.01)
+    voltage_cutoff = st.slider("Min Voltage (V)", 0.0, 2.0, key="voltage_cutoff", step=0.1)
+
+# ---------------- AUTHENTICATION ----------------
+if st.session_state.user_id is None:
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("ACCESS TERMINAL")
+        uid_input = st.text_input("USER ID", placeholder="ENTER ID...")
+        if st.button("LOGIN"):
+            if uid_input:
+                try:
+                    user = get_user(int(uid_input))
+                    if user:
+                        st.session_state.user_id = user[0]
+                        st.session_state.coins = user[3]
+                        st.rerun()
+                    else: st.error("ACCESS DENIED")
+                except: st.error("INVALID INPUT")
+
+    with c2:
+        st.subheader("NEW USER")
+        name = st.text_input("NAME")
+        phone = st.text_input("PHONE")
+        if st.button("REGISTER"):
+            if name and phone:
+                uid = create_user(name, phone)
+                st.session_state.user_id = uid
+                st.rerun()
+else:
+    # ---------------- MAIN DASHBOARD ----------------
+    
+    # 1. LIVE METRICS (Placeholders)
+    m1, m2, m3, m4 = st.columns(4)
+    coin_metric = m1.empty()
+    status_metric = m2.empty()
+    power_metric = m3.empty()
+    current_metric = m4.empty()
+    
+    coin_metric.metric("TOKENS", f"{st.session_state.coins:.4f}")
+    status_metric.info("Please Start System")
+    
+    st.divider()
+    
+    # 2. CONTROLS
+    c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
+    with c1:
+        port = st.text_input("PORT", value="COM7", label_visibility="collapsed", key="port_in")
+    with c2:
+        if not st.session_state.running:
+            if st.button("▶ START", type="primary", use_container_width=True):
+                try:
                     st.session_state.ser = serial.Serial(port, 115200, timeout=1)
                     st.session_state.running = True
-                    st.toast("Connected!", icon="🔌")
                     st.rerun()
-            except Exception as e:
-                st.error(f"Failed: {e}")
-
-        if c2.button("Stop"):
-            if st.session_state.ser:
-                st.session_state.ser.close()
-            st.session_state.running = False
-            st.toast("Stopped")
-            st.rerun()
-
-        st.divider()
-        st.markdown("### 🧪 Testing")
-        
-        def toggle_sim():
-            st.session_state.simulate_grid = not st.session_state.simulate_grid
-            
-        st.checkbox("Simulate Fake Grid", value=st.session_state.simulate_grid, on_change=toggle_sim)
-
-
-    # Main Layout
-    
-    # 1. METRICS ROW
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Green Coins", f"{st.session_state.coins:.4f}")
-    
-    # Placeholders for dynamic updates
-    status_ph = m2.empty()
-    power_ph = m3.empty()
-    curr_ph = m4.empty()
-    
-    # Graph Placeholders
-    st.divider()
-    g1, g2, g3 = st.columns(3)
-    graph_ph_v = g1.empty()
-    graph_ph_c = g2.empty()
-    graph_ph_p = g3.empty()
-
-    
-    # ---------------- REAL-TIME LOOP ----------------
-    if st.session_state.running:
-        
-        # Read Data
-        voltage, current, power = 0.0, 0.0, 0.0
-        
-        # Try Read Serial
-        if st.session_state.ser and st.session_state.ser.in_waiting > 0:
-            try:
-                line = st.session_state.ser.readline().decode(errors="ignore").strip()
-                if line and "," in line:
-                    parts = line.split(",")
-                    if len(parts) == 3:
-                        voltage = float(parts[0])
-                        current = abs(float(parts[1]))
-                        power = voltage * current
-            except:
-                pass
-
-        # Simulation Override
-        if st.session_state.simulate_grid:
-            voltage = 5.0 
-            current = 200.0
-            power = voltage * current
-
-        # Buffer Update
-        temp_data = [voltage, current, power]
-        st.session_state.data_buffer.append(temp_data)
-        if len(st.session_state.data_buffer) > 50:
-            st.session_state.data_buffer.pop(0)
-
-        # Train Logic
-        if len(st.session_state.data_buffer) >= 20 and not st.session_state.model.trained:
-            training_data = list(st.session_state.data_buffer)[-20:] 
-            st.session_state.model.train(training_data)
-            st.toast("Model Calibrated", icon="🧠")
-
-        # Prediction Logic
-        status_text = "Waiting..."
-        is_anomaly = 0
-        coins_earned = 0.0
-        
-        if st.session_state.model.trained:
-            prediction = st.session_state.model.predict(temp_data)
-            now = time.time()
-            time_left = max(0, st.session_state.penalty_until - now)
-            
-            if prediction == -1: # Anomaly
-                is_anomaly = 1
-                status_text = "🚨 ANOMALY"
-                st.session_state.penalty_until = now + 30
-                status_ph.error(status_text)
-            
-            elif time_left > 0: # Penalty
-                status_text = f"🚫 PENALTY ({int(time_left)}s)"
-                is_anomaly = 0 
-                status_ph.warning(status_text)
-            
-            else: # Normal
-                status_text = "✅ VERIFIED"
-                is_anomaly = 0
-                coins_earned = power * 0.0001
-                st.session_state.coins += coins_earned
-                update_coins(user_id, st.session_state.coins)
-                status_ph.success(status_text)
+                except Exception as e:
+                    st.error(f"ERR: {e}")
         else:
-             status_ph.info("Calibrating...")
+             if st.button("⏹ STOP", use_container_width=True):
+                 st.session_state.running = False
+                 if st.session_state.ser: st.session_state.ser.close()
+                 st.rerun()
+    with c3:
+        # SIMULATION TOGGLE
+        sim_mode = st.toggle("🚨 SIMULATE GRID ATTACK", value=st.session_state.simulate_grid, key="sim_toggle")
+        st.session_state.simulate_grid = sim_mode
+        
+    with c4:
+        if st.session_state.running:
+            st.code("STATUS: MONITORING STREAM...", language="bash")
+        else:
+            st.code("STATUS: OFFLINE", language="bash")
 
-        # Update Metrics
-        p_str = f"{(power*1000):.1f} µW" if power < 1.0 else f"{power:.2f} mW"
-        c_str = f"{(current*1000):.1f} µA" if current < 1.0 else f"{current:.2f} mA"
-        
-        power_ph.metric("Power", p_str)
-        curr_ph.metric("Current", c_str)
-        
-        # Update Graphs (using st.line_chart directly on placeholders doesn't work well in loop, simpler to redraw)
-        df_chart = pd.DataFrame(st.session_state.data_buffer, columns=["Voltage", "Current", "Power"])
-        
-        with graph_ph_v:
-            st.subheader("Voltage")
-            st.line_chart(df_chart["Voltage"], height=200, color="#FF4B4B")
+    # 3. GRAPHS (Placeholders to prevent full redraw)
+    g1, g2 = st.columns(2)
+    chart_v = g1.empty()
+    chart_p = g2.empty()
+
+    # 4. LOGIC LOOP (Non-blocking UI update)
+    if st.session_state.running:
+        while True:
+            # A. READ DATA
+            voltage, current, power = st.session_state.last_vals
             
-        with graph_ph_c:
-            st.subheader("Current")
-            st.line_chart(df_chart["Current"], height=200, color="#29B5E8")
+            if st.session_state.simulate_grid:
+                voltage = 5.0
+                current = 2.5
+                power = voltage * current
+                st.session_state.last_vals = (voltage, current, power)
+                
+            elif st.session_state.ser:
+                got_new = False
+                while st.session_state.ser.in_waiting > 0:
+                    try:
+                        line = st.session_state.ser.readline().decode(errors="ignore").strip()
+                        if line and "," in line:
+                            p = line.split(",")
+                            if len(p) == 3:
+                                rv, rc = float(p[0]), abs(float(p[1]))
+                                v = 0.0 if rv < voltage_cutoff else rv
+                                c = 0.0 if rc < noise_threshold else rc
+                                voltage, current, power = v, c, v*c
+                                got_new = True
+                    except: pass
+                
+                if got_new:
+                    st.session_state.last_vals = (voltage, current, power)
             
-        with graph_ph_p:
-            st.subheader("Power")
-            st.line_chart(df_chart["Power"], height=200, color="#17C37B")
+            # B. BUFFER
+            st.session_state.data_buffer.append([voltage, current, power])
+            if len(st.session_state.data_buffer) > 60:
+                st.session_state.data_buffer.pop(0)
+            
+            # C. MODEL & STATUS
+            status_text = "VERIFIED"
+            status_color = "normal"
+            is_anom = 0
+            
+            # Train if needed
+            if len(st.session_state.data_buffer) >= 20 and not st.session_state.model.trained:
+                st.session_state.model.train(list(st.session_state.data_buffer)[-20:])
+                
+            if st.session_state.model.trained:
+                pred = st.session_state.model.predict([voltage, current, power])
+                
+                if pred == -1:
+                    status_text = "🚨 FRAUD DETECTED"
+                    is_anom = 1
+                    status_metric.error(status_text)
+                elif power < 0.001:
+                    status_text = "💤 IDLE"
+                    status_metric.info(status_text)
+                else:
+                     status_text = "✅ SECURED"
+                     gain = power * 0.0001
+                     st.session_state.coins += gain
+                     status_metric.success(status_text)
+                     update_coins(st.session_state.user_id, st.session_state.coins)
 
-        # Log DB
-        log_reading(user_id, voltage, current, power, is_anomaly, coins_earned)
-        
-        # Rerun loop
-        time.sleep(0.1 if st.session_state.simulate_grid else 0.5)
-        st.rerun()
-
+            # D. UI UPDATES (Fast)
+            coin_metric.metric("TOKENS", f"{st.session_state.coins:.4f}")
+            power_metric.metric("POWER", f"{power*1000:.1f} mW")
+            current_metric.metric("CURRENT", f"{current*1000:.1f} mA")
+            
+            # Graphs
+            df = pd.DataFrame(st.session_state.data_buffer, columns=["V", "C", "P"])
+            chart_v.line_chart(df["V"], height=250) # Auto-updates without full rerun
+            chart_p.line_chart(df["P"], height=250)
+            
+            # Log
+            log_reading(st.session_state.user_id, voltage, current, power, is_anom, 0)
+            
+            # Loop control
+            time.sleep(0.1) # Fast refresh
+            
     else:
-        # Static View (Not Running)
-        st.info("Click Start to begin monitoring.")
-        
         st.divider()
-        st.subheader("Audit Log")
-        history_raw = get_history(user_id, limit=20)
-        hist_data = []
-        for row in history_raw:
-             ts, v, c, p, anom = row
-             status_str = "FRAUD" if anom else "VERIFIED"
-             t_str = time.strftime('%H:%M:%S', time.localtime(ts))
-             hist_data.append([t_str, f"{v:.2f} V", f"{p:.2f} mW", status_str])
-        
-        st.table(pd.DataFrame(hist_data, columns=["Time", "Voltage", "Power", "Status"]))
+        st.caption("RECENT AUDIT LOG")
+        hist = get_history(st.session_state.user_id, 10)
+        st.dataframe(pd.DataFrame(hist, columns=["TS", "V", "C", "P", "FRAUD_FLAG"]))
